@@ -1,7 +1,6 @@
 // Import Third-party Dependencies
 import {
-  initRedis,
-  closeRedis
+  RedisAdapter
 } from "@myunisoft/redis";
 
 // Import Internal Dependencies
@@ -12,23 +11,25 @@ import {
 } from "../../../../src/class/store/transaction.class.js";
 
 let transactionStore: TransactionStore<"dispatcher">;
+const redis = new RedisAdapter({
+  port: Number(process.env.REDIS_PORT),
+  host: process.env.REDIS_HOST
+});
 
 beforeAll(async() => {
-  const redis = await initRedis({
-    port: process.env.REDIS_PORT,
-    host: process.env.REDIS_HOST
-  } as any);
+  await redis.initialize();
 
   await redis.flushall();
 });
 
 afterAll(async() => {
-  await closeRedis();
+  await redis.close();
 });
 
 describe("Transaction options", () => {
   beforeAll(async() => {
     transactionStore = new TransactionStore<"dispatcher">({
+      adapter: redis,
       instance: "dispatcher"
     });
   });

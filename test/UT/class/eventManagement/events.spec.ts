@@ -3,11 +3,8 @@ import timers from "node:timers/promises";
 
 // Import Third-party Dependencies
 import {
-  initRedis,
-  closeAllRedis,
-  clearAllKeys,
-  Channel,
-  getRedis
+  RedisAdapter,
+  Channel
 } from "@myunisoft/redis";
 import { pino } from "pino";
 import { Ok } from "@openally/result";
@@ -52,6 +49,15 @@ interface InitDispatcherInstanceOptions {
   idleTime?: number;
 }
 
+const redis = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+const subscriber = new RedisAdapter({
+  port: Number(process.env.REDIS_PORT),
+  host: process.env.REDIS_HOST
+});
+
 async function initDispatcherInstance(
   options: InitDispatcherInstanceOptions = {
     pingInterval: 10_000,
@@ -63,6 +69,8 @@ async function initDispatcherInstance(
   const { pingInterval, checkTransactionInterval, idleTime, checkLastActivityInterval } = options;
 
   const dispatcher = new Dispatcher<EventOptions<keyof Events>>({
+    redis,
+    subscriber,
     pingInterval,
     checkLastActivityInterval,
     checkTransactionInterval,
@@ -96,6 +104,7 @@ async function handleRegistration(instance: Incomer, message: any) {
   );
 
   const instanceTransactionStore = new TransactionStore({
+    adapter: redis,
     prefix: data.uuid,
     instance: "incomer"
   });
@@ -106,28 +115,21 @@ async function handleRegistration(instance: Incomer, message: any) {
 }
 
 beforeAll(async() => {
-  await initRedis({
-    port: process.env.REDIS_PORT,
-    host: process.env.REDIS_HOST,
-    enableAutoPipelining: true
-  } as any);
+  await redis.initialize();
+    await subscriber.initialize();
 
-  await getRedis()!.flushall();
-
-  await initRedis({
-    port: process.env.REDIS_PORT,
-    host: process.env.REDIS_HOST,
-    enableAutoPipelining: true
-  } as any, "subscriber");
+    await redis.flushall();
 });
 
 afterAll(async() => {
-  await closeAllRedis();
+  await redis.close();
+    await subscriber.close();
 });
 
 afterEach(async() => {
   jest.clearAllMocks();
-  await clearAllKeys();
+  await redis.close();
+  await subscriber.close();
 });
 
 describe("Publishing an event without concerned Incomer", () => {
@@ -167,6 +169,8 @@ describe("Publishing an event without concerned Incomer", () => {
     dispatcher = await initDispatcherInstance();
 
     publisher = new Incomer({
+      redis,
+      subscriber,
       name: "foo",
       logger: incomerLogger,
       eventsCast: ["accountingFolder"],
@@ -175,6 +179,8 @@ describe("Publishing an event without concerned Incomer", () => {
     });
 
     unConcernedIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "bar",
       logger: incomerLogger,
       eventsCast: [],
@@ -198,6 +204,7 @@ describe("Publishing an event without concerned Incomer", () => {
           }));
 
           publisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: data.uuid,
             instance: "incomer"
           });
@@ -219,6 +226,7 @@ describe("Publishing an event without concerned Incomer", () => {
           }));
 
           unConcernedTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: data.uuid,
             instance: "incomer"
           });
@@ -298,6 +306,8 @@ describe("Event that doesn't scale", () => {
     dispatcher = await initDispatcherInstance();
 
     publisher = new Incomer({
+      redis,
+      subscriber,
       name: "foo",
       logger: incomerLogger,
       eventsCast: ["accountingFolder"],
@@ -306,6 +316,8 @@ describe("Event that doesn't scale", () => {
     });
 
     concernedIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "bar",
       logger: incomerLogger,
       eventsCast: [],
@@ -314,6 +326,8 @@ describe("Event that doesn't scale", () => {
     });
 
     secondConcernedIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "bar",
       logger: incomerLogger,
       eventsCast: [],
@@ -322,6 +336,8 @@ describe("Event that doesn't scale", () => {
     });
 
     diffConcernedIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "foo-bar",
       logger: incomerLogger,
       eventsCast: [],
@@ -501,6 +517,8 @@ describe("Event that scale", () => {
     dispatcher = await initDispatcherInstance();
 
     publisher = new Incomer({
+      redis,
+      subscriber,
       name: "foo",
       logger: incomerLogger,
       eventsCast: ["accountingFolder"],
@@ -509,6 +527,8 @@ describe("Event that scale", () => {
     });
 
     concernedIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "bar",
       logger: incomerLogger,
       eventsCast: [],
@@ -517,6 +537,8 @@ describe("Event that scale", () => {
     });
 
     secondConcernedIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "bar",
       logger: incomerLogger,
       eventsCast: [],
@@ -525,6 +547,8 @@ describe("Event that scale", () => {
     });
 
     diffConcernedIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "foo-bar",
       logger: incomerLogger,
       eventsCast: [],

@@ -3,10 +3,7 @@ import timers from "node:timers/promises";
 
 // Import Third-party Dependencies
 import {
-  initRedis,
-  clearAllKeys,
-  closeAllRedis,
-  getRedis
+  RedisAdapter
 } from "@myunisoft/redis";
 import { pino } from "pino";
 import { Ok } from "@openally/result";
@@ -32,8 +29,16 @@ const incomerLogger = pino({
 });
 const mockedIncomerLoggerInfo = jest.spyOn(incomerLogger, "info");
 
-
 describe("Registration", () => {
+  const redis = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+  const subscriber = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+
   let dispatcher: Dispatcher;
   let incomer: Incomer;
 
@@ -60,19 +65,14 @@ describe("Registration", () => {
   }
 
   beforeAll(async() => {
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any);
+    await redis.flushall();
 
-    await getRedis()!.flushall();
-
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any, "subscriber");
+    await redis.initialize();
+    await subscriber.initialize();
 
     dispatcher = new Dispatcher({
+      redis,
+      subscriber,
       logger: dispatcherLogger,
       pingInterval: 1_000,
       checkLastActivityInterval: 1_000,
@@ -85,11 +85,12 @@ describe("Registration", () => {
 
   afterAll(async() => {
     await dispatcher.close();
-    await closeAllRedis();
+    await redis.close();
+    await subscriber.close();
   });
 
   afterEach(async() => {
-    await clearAllKeys();
+    await redis.flushdb();
   });
 
   describe("Initializing a new Incomer", () => {
@@ -104,6 +105,8 @@ describe("Registration", () => {
 
     beforeAll(async() => {
       incomer = new Incomer({
+        redis,
+        subscriber,
         name: "bar",
         eventsCast: [],
         eventsSubscribe: [],

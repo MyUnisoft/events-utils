@@ -4,17 +4,24 @@ import { randomUUID } from "node:crypto";
 // Import Third-party Dependencies
 import {
   KVOptions,
-  KVPeer
+  KVPeer,
+  RedisAdapter,
+  Types
 } from "@myunisoft/redis";
 
 // Import Internal Dependencies
 import type { RegisteredIncomer } from "../../types/index.js";
 
 export type IncomerStoreOptions = Partial<KVOptions<RegisteredIncomer>> & {
+  adapter: Types.DatabaseConnection<RedisAdapter>;
   idleTime: number;
 }
 
-export class IncomerStore extends KVPeer<RegisteredIncomer> {
+export class IncomerStore extends KVPeer<
+  RegisteredIncomer,
+  null,
+  RedisAdapter
+> {
   #key: string;
   #idleTime: number;
 
@@ -69,7 +76,7 @@ export class IncomerStore extends KVPeer<RegisteredIncomer> {
     let cursor = 0;
 
     do {
-      const [lastCursor, incomerKeys] = await this.redis.scan(
+      const [lastCursor, incomerKeys] = await this.adapter.scan(
         cursor,
         "MATCH",
         `${this.#key}-*`,

@@ -3,9 +3,7 @@ import timers from "node:timers/promises";
 
 // Import Third-party Dependencies
 import {
-  initRedis,
-  closeAllRedis,
-  getRedis
+  RedisAdapter
 } from "@myunisoft/redis";
 import { Ok } from "@openally/result";
 
@@ -24,6 +22,15 @@ const kIdleTime = 4_000;
 describe("Init Incomer without Dispatcher alive", () => {
   const eventComeBackHandler = jest.fn().mockImplementation(() => Ok({ status: "RESOLVED" }));;
 
+  const redis = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+  const subscriber = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+
   const pingInterval = 2_000;
 
   let incomer: Incomer;
@@ -31,19 +38,14 @@ describe("Init Incomer without Dispatcher alive", () => {
   let dispatcher: Dispatcher;
 
   beforeAll(async() => {
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any);
+    await redis.initialize();
+    await subscriber.initialize();
 
-    await getRedis()!.flushall();
-
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any, "subscriber");
+    await redis.flushall();
 
     incomer = new Incomer({
+      redis,
+      subscriber,
       name: "foo",
       eventsCast: [],
       eventsSubscribe: [],
@@ -56,6 +58,8 @@ describe("Init Incomer without Dispatcher alive", () => {
     });
 
     dispatcherIncomer = new Incomer({
+      redis,
+      subscriber,
       name: "node:Pulsar",
       eventsCast: [],
       eventsSubscribe: [],
@@ -69,6 +73,8 @@ describe("Init Incomer without Dispatcher alive", () => {
     });
 
     dispatcher = new Dispatcher({
+      redis,
+      subscriber,
       pingInterval: pingInterval,
       idleTime: kIdleTime,
       incomerUUID: dispatcherIncomer.baseUUID,
@@ -117,6 +123,7 @@ describe("Init Incomer without Dispatcher alive", () => {
 
   afterAll(async() => {
     await dispatcherIncomer.close();
-    await closeAllRedis();
+    await redis.close();
+    await subscriber.close();
   });
 });

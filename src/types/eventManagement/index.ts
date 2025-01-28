@@ -35,7 +35,6 @@ export interface RegisteredIncomer {
   aliveSince: number;
   eventsCast: string[];
   eventsSubscribe: EventSubscribe[];
-  prefix?: string;
 }
 
 export type Instance = "dispatcher" | "incomer";

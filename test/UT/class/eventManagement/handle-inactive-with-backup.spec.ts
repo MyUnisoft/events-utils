@@ -3,11 +3,8 @@ import timers from "node:timers/promises";
 
 // Import Third-party Dependencies
 import {
-  initRedis,
-  clearAllKeys,
-  Channel,
-  closeAllRedis,
-  getRedis
+  RedisAdapter,
+  Channel
 } from "@myunisoft/redis";
 import { pino } from "pino";
 import { Ok } from "@openally/result";
@@ -32,20 +29,24 @@ const mockedEventComeBackHandler = jest.fn().mockImplementation(() => Ok({ statu
 describe("Publishing/exploiting a custom event & inactive incomer", () => {
   let dispatcher: Dispatcher<EventOptions<keyof Events>>;
 
+  const redis = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+  const subscriber = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+
   beforeAll(async() => {
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any);
+    await redis.initialize();
+    await subscriber.initialize();
 
-    await getRedis()!.flushall();
-
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any, "subscriber");
+    await redis.flushall();
 
     dispatcher = new Dispatcher({
+      redis,
+      subscriber,
       logger: dispatcherLogger,
       pingInterval: 2_000,
       checkLastActivityInterval: 2_000,
@@ -62,12 +63,13 @@ describe("Publishing/exploiting a custom event & inactive incomer", () => {
 
   afterAll(async() => {
     await dispatcher.close();
-    await closeAllRedis();
+    await redis.close();
+    await subscriber.close();
   });
 
   afterEach(async() => {
     jest.clearAllMocks();
-    await clearAllKeys();
+    await redis.flushdb();
   });
 
   describe("Inactive incomer with back-up available", () => {
@@ -107,10 +109,13 @@ describe("Publishing/exploiting a custom event & inactive incomer", () => {
           concernedIncomer["subscriber"]!.subscribe(data.uuid);
 
           Reflect.set(concernedIncomer, "incomerChannel", new Channel({
+            port: Number(process.env.REDIS_PORT),
+            host: process.env.REDIS_HOST,
             name: data.uuid
           }));
 
           firstIncomerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: data.uuid,
             instance: "incomer"
           });
@@ -129,10 +134,13 @@ describe("Publishing/exploiting a custom event & inactive incomer", () => {
           secondConcernedIncomer["subscriber"]!.subscribe(data.uuid);
 
           Reflect.set(secondConcernedIncomer, "incomerChannel", new Channel({
+            port: Number(process.env.REDIS_PORT),
+            host: process.env.REDIS_HOST,
             name: data.uuid
           }));
 
           secondIncomerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: data.uuid,
             instance: "incomer"
           });
@@ -148,6 +156,8 @@ describe("Publishing/exploiting a custom event & inactive incomer", () => {
 
     beforeAll(async() => {
       concernedIncomer = new Incomer({
+        redis,
+        subscriber,
         name: "foo",
         eventsCast: ["accountingFolder"],
         eventsSubscribe: [{ name: "accountingFolder" }],
@@ -174,6 +184,8 @@ describe("Publishing/exploiting a custom event & inactive incomer", () => {
         });
 
       secondConcernedIncomer = new Incomer({
+        redis,
+        subscriber,
         name: "foo",
         eventsCast: ["accountingFolder"],
         eventsSubscribe: [{ name: "accountingFolder" }],

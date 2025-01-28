@@ -6,9 +6,7 @@ import { setTimeout} from "node:timers/promises";
 
 // Import Third-Party Dependencies
 import {
-  closeAllRedis,
-  closeRedis,
-  initRedis,
+  RedisAdapter,
   Redis
 } from "@myunisoft/redis";
 import pino, { Logger } from "pino";
@@ -31,31 +29,31 @@ const kBackupTransactionStoreName = "backup";
 const kIdleTime = 60_000;
 
 describe("transactionHandler", () => {
-  let subscriber: Redis;
-  let redis: Redis;
+  const redis = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+  const foo = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+  const subscriber = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
 
   before(async() => {
-    await initRedis({
-      port: Number(process.env.REDIS_PORT),
-      host: process.env.REDIS_HOST
-    });
-
-    subscriber = await initRedis({
-      port: Number(process.env.REDIS_PORT),
-      host: process.env.REDIS_HOST
-    }, "subscriber");
-
-    redis = await initRedis({
-      port: Number(process.env.REDIS_PORT),
-      host: process.env.REDIS_HOST
-    }, undefined, true);
+    await redis.initialize();
+    await foo.initialize();
+    await subscriber.initialize();
 
     await redis.flushall();
   });
 
   after(async() => {
-    await closeAllRedis();
-    await closeRedis(undefined, redis);
+    await redis.close();
+    await foo.close();
+    await subscriber.close();
   });
 
   describe("transactionHandler with default options", () => {
@@ -71,21 +69,25 @@ describe("transactionHandler", () => {
     });
 
     const incomerStore: IncomerStore = new IncomerStore({
+      adapter: redis,
       prefix: kPrefix,
       idleTime: kIdleTime
     });
 
     const dispatcherTransactionStore: TransactionStore<"dispatcher"> = new TransactionStore({
+      adapter: redis,
       prefix: kPrefix,
       instance: "dispatcher"
     });
 
     const backupDispatcherTransactionStore: TransactionStore<"dispatcher"> = new TransactionStore({
+      adapter: redis,
       prefix: formattedPrefix + kBackupTransactionStoreName,
       instance: "dispatcher"
     });
 
     const backupIncomerTransactionStore: TransactionStore<"incomer"> = new TransactionStore({
+      adapter: redis,
       prefix: formattedPrefix + kBackupTransactionStoreName,
       instance: "incomer"
     });
@@ -101,6 +103,7 @@ describe("transactionHandler", () => {
     })
 
     const transactionHandler: TransactionHandler = new TransactionHandler({
+      redis,
       privateUUID,
       formattedPrefix,
       incomerStore,
@@ -173,11 +176,13 @@ describe("transactionHandler", () => {
           };
 
           const publisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${publisher.providedUUID}`,
             instance: "incomer"
           });
 
           const listenerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${listener.providedUUID}`,
             instance: "incomer"
           });
@@ -269,11 +274,13 @@ describe("transactionHandler", () => {
           };
 
           const publisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${publisher.providedUUID}`,
             instance: "incomer"
           });
 
           const listenerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${listener.providedUUID}`,
             instance: "incomer"
           });
@@ -357,11 +364,13 @@ describe("transactionHandler", () => {
           };
 
           const publisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${publisher.providedUUID}`,
             instance: "incomer"
           });
 
           const listenerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${listener.providedUUID}`,
             instance: "incomer"
           });
@@ -453,11 +462,13 @@ describe("transactionHandler", () => {
           };
 
           const publisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${publisher.providedUUID}`,
             instance: "incomer"
           });
 
           const listenerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${listener.providedUUID}`,
             instance: "incomer"
           });
@@ -556,16 +567,19 @@ describe("transactionHandler", () => {
           };
 
           const publisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${publisher.providedUUID}`,
             instance: "incomer"
           });
 
           const backupPublisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${backupPublisher.providedUUID}`,
             instance: "incomer"
           });
 
           const listenerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${listener.providedUUID}`,
             instance: "incomer"
           });
@@ -647,11 +661,13 @@ describe("transactionHandler", () => {
           };
 
           const publisherTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${publisher.providedUUID}`,
             instance: "incomer"
           });
 
           const listenerTransactionStore = new TransactionStore({
+            adapter: redis,
             prefix: `${kPrefix}-${listener.providedUUID}`,
             instance: "incomer"
           });

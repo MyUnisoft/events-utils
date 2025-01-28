@@ -4,7 +4,9 @@ import { randomUUID } from "node:crypto";
 // Import Third-party Dependencies
 import {
   KVOptions,
-  KVPeer
+  KVPeer,
+  RedisAdapter,
+  Types
 } from "@myunisoft/redis";
 
 // Import Internal Dependencies
@@ -17,7 +19,6 @@ import type {
   DistributedEventMessage,
   Instance
 } from "../../types/index.js";
-
 type BaseTransaction<
   IsMain extends boolean = true,
   RelatedTransaction = IsMain extends true ? null : string
@@ -98,12 +99,17 @@ export type TransactionStoreOptions<
   T extends Instance
 > = (Partial<KVOptions<Transactions<T>>> &
   T extends "incomer" ? { prefix: string; } : { prefix?: string; }) & {
+    adapter: Types.DatabaseConnection<RedisAdapter>;
     instance: T;
 };
 
 export class TransactionStore<
   T extends Instance = Instance
-> extends KVPeer<Transaction<T>> {
+> extends KVPeer<
+  Transaction<T>,
+  null,
+  RedisAdapter
+> {
   #key: string;
 
   constructor(
@@ -128,7 +134,7 @@ export class TransactionStore<
     let cursor = 0;
 
     do {
-      const [lastCursor, elements] = await this.redis.scan(
+      const [lastCursor, elements] = await this.adapter.scan(
         cursor,
         "MATCH",
         `${this.#key}-*`,
@@ -219,6 +225,6 @@ export class TransactionStore<
   async deleteTransactions(
     transactionIds: string[]
   ): Promise<void> {
-    await this.redis.del(transactionIds);
+    await this.adapter.del(transactionIds);
   }
 }

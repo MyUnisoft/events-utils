@@ -146,7 +146,7 @@ export class EventsHandler<T extends GenericEvent> extends EventEmitter {
       } as any
     }, dispatcherTransactionUUID);
 
-    await channel.publish({
+    await channel.pub({
       ...event,
       redisMetadata: {
         ...event.redisMetadata,

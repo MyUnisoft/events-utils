@@ -4,10 +4,7 @@ import timers from "node:timers/promises";
 
 // Import Third-party Dependencies
 import {
-  initRedis,
-  clearAllKeys,
-  closeAllRedis,
-  getRedis
+  RedisAdapter
 } from "@myunisoft/redis";
 import { pino } from "pino";
 import { Ok } from "@openally/result";
@@ -27,25 +24,29 @@ const incomerLogger = pino({
 const mockedIncomerLoggerDebug = jest.spyOn(incomerLogger, "debug");
 
 describe("Ping", () => {
-  const eventComeBackHandler = jest.fn().mockImplementation(() => Ok({ status: "RESOLVED" }));;
+  const eventComeBackHandler = jest.fn().mockImplementation(() => Ok({ status: "RESOLVED" }));
+
+  const redis = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
+  const subscriber = new RedisAdapter({
+    port: Number(process.env.REDIS_PORT),
+    host: process.env.REDIS_HOST
+  });
 
   let dispatcher: Dispatcher;
   let incomer: Incomer;
 
   beforeAll(async() => {
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any);
+    await redis.initialize();
+    await subscriber.initialize();
 
-    await getRedis()!.flushall();
-
-    await initRedis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST
-    } as any, "subscriber");
+    await redis.flushall();
 
     dispatcher = new Dispatcher({
+      redis,
+      subscriber,
       logger: dispatcherLogger,
       pingInterval: 1_600,
       checkLastActivityInterval: 4_000,
@@ -58,6 +59,8 @@ describe("Ping", () => {
     await dispatcher.initialize();
 
     incomer = new Incomer({
+      redis,
+      subscriber,
       name: randomUUID(),
       logger: incomerLogger,
       eventsCast: [],
@@ -73,11 +76,12 @@ describe("Ping", () => {
   afterAll(async() => {
     await dispatcher.close();
     await incomer.close();
-    await closeAllRedis();
+    await redis.close();
+    await subscriber.close();
   });
 
   afterEach(async() => {
-    await clearAllKeys();
+    await redis.flushdb();
   });
 
   test("Dispatcher should have ping", () => {

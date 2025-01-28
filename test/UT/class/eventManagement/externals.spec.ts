@@ -1,8 +1,6 @@
 // Import Third-party Dependencies
 import {
-  initRedis,
-  closeAllRedis,
-  getRedis
+  RedisAdapter
 } from "@myunisoft/redis";
 import { pino } from "pino";
 import { Ok } from "@openally/result";
@@ -14,22 +12,25 @@ const incomerLogger = pino({
   level: "debug"
 });
 
+const redis = new RedisAdapter({
+  port: Number(process.env.REDIS_PORT),
+  host: process.env.REDIS_HOST
+});
+const subscriber = new RedisAdapter({
+  port: Number(process.env.REDIS_PORT),
+  host: process.env.REDIS_HOST
+});
+
 beforeAll(async() => {
-  await initRedis({
-    port: Number(process.env.REDIS_PORT),
-    host: process.env.REDIS_HOST
-  });
+  await redis.initialize();
+    await subscriber.initialize();
 
-  await initRedis({
-    port: Number(process.env.REDIS_PORT),
-    host: process.env.REDIS_HOST
-  }, "subscriber");
-
-  await getRedis()!.flushall();
+    await redis.flushall();
 });
 
 afterAll(async() => {
-  await closeAllRedis();
+  await redis.close();
+  await subscriber.close();
 });
 
 describe("Init Incomer without Dispatcher alive & prefix as \"test\"", () => {
@@ -37,6 +38,8 @@ describe("Init Incomer without Dispatcher alive & prefix as \"test\"", () => {
 
   describe("With externalsInitialized at true", () => {
     const incomer: Incomer = new Incomer({
+      redis,
+      subscriber,
       name: "foo",
       prefix: "test",
       logger: incomerLogger,
@@ -62,6 +65,8 @@ describe("Init Incomer without Dispatcher alive & prefix as \"test\"", () => {
 
   describe("Prefix as \"test\"", () => {
     const incomer: Incomer = new Incomer({
+      redis,
+      subscriber,
       name: "foo",
       prefix: "test",
       logger: incomerLogger,

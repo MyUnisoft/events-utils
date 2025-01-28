@@ -4,7 +4,10 @@
 import { randomUUID } from "node:crypto";
 
 // Import Third-party Dependencies
-import { Channel } from "@myunisoft/redis";
+import { Channel,
+  RedisAdapter,
+  Types
+} from "@myunisoft/redis";
 import { Mutex } from "@openally/mutex";
 import type { Logger } from "pino";
 
@@ -31,6 +34,7 @@ import type {
   IncomerChannelMessages,
   RegisteredIncomer
 } from "../../../types/index.js";
+import { DatabaseConnection } from "@myunisoft/redis/dist/types/index.js";
 
 
 interface DistributeMainTransactionOptions {
@@ -78,6 +82,7 @@ export interface DispatchEventOptions<T extends GenericEvent> {
 }
 
 export type TransactionHandlerOptions<T extends GenericEvent = GenericEvent> = {
+  redis: DatabaseConnection<RedisAdapter>;
   eventsHandler: EventsHandler<T>;
   dispatcherTransactionStore: TransactionStore<"dispatcher">;
   backupDispatcherTransactionStore: TransactionStore<"dispatcher">;
@@ -124,22 +129,24 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
   public dispatcherTransactionStore: TransactionStore<"dispatcher">;
   public backupIncomerTransactionStore: TransactionStore<"incomer">;
 
-  private incomerChannelHandler: IncomerChannelHandler<T>;
-  private eventsHandler: EventsHandler<T>;
-  private logger: Logger;
-  private standardLogFn: StandardLog<T>;
+  #redis: Types.DatabaseConnection<RedisAdapter>;
 
-  private resolveTransactionsLock = new Mutex({ concurrency: 1 });
+  #incomerChannelHandler: IncomerChannelHandler<T>;
+  #eventsHandler: EventsHandler<T>;
+  #logger: Logger;
+  #standardLogFn: StandardLog<T>;
+
+  #resolveTransactionsLock = new Mutex({ concurrency: 1 });
 
   constructor(opts: TransactionHandlerOptions<T>) {
     Object.assign(this, opts);
 
-    this.logger = opts.parentLogger.child({ module: "transaction-handler" }) || opts.parentLogger;
-    this.standardLogFn = opts.standardLog ?? defaultStandardLog;
+    this.#logger = opts.parentLogger.child({ module: "transaction-handler" }) || opts.parentLogger;
+    this.#standardLogFn = opts.standardLog ?? defaultStandardLog;
   }
 
   public async resolveTransactions() {
-    const free = await this.resolveTransactionsLock.acquire();
+    const free = await this.#resolveTransactionsLock.acquire();
 
     try {
       const [incomers, backupIncomerTransactions, dispatcherTransactions] = await Promise.all([
@@ -168,7 +175,8 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
     inactiveIncomer: RegisteredIncomer
   ) {
     const inactiveIncomerTransactionStore = new TransactionStore({
-      prefix: `${inactiveIncomer.prefix ? `${inactiveIncomer.prefix}-` : ""}${inactiveIncomer.providedUUID}`,
+      adapter: this.#redis,
+      prefix: inactiveIncomer.providedUUID,
       instance: "incomer"
     });
 
@@ -315,8 +323,8 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
   private async removeDispatcherUnknownTransaction(dispatcherTransaction: Transaction<"dispatcher">) {
     await this.dispatcherTransactionStore.deleteTransaction(dispatcherTransaction.redisMetadata.transactionId);
 
-    this.logger.warn(
-      this.standardLogFn({ ...dispatcherTransaction } as any)("Removed Dispatcher Transaction unrelated to an known event")
+    this.#logger.warn(
+      this.#standardLogFn({ ...dispatcherTransaction } as any)("Removed Dispatcher Transaction unrelated to an known event")
     );
   }
 
@@ -334,8 +342,8 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
       )
     ]);
 
-    this.logger.debug(
-      this.standardLogFn({ ...relatedHandlerTransaction } as any)("Resolved transaction has been back up")
+    this.#logger.debug(
+      this.#standardLogFn({ ...relatedHandlerTransaction } as any)("Resolved transaction has been back up")
     );
   }
 
@@ -375,13 +383,13 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
       }
 
       if (isoSubscriberIncomer) {
-        const { providedUUID, prefix } = isoSubscriberIncomer;
+        const { providedUUID } = isoSubscriberIncomer;
 
-        const isoSubscriberChannel = this.incomerChannelHandler.get(providedUUID) ??
-          this.incomerChannelHandler.set({ uuid: providedUUID, prefix });
+        const isoSubscriberChannel = this.#incomerChannelHandler.get(providedUUID) ??
+          this.#incomerChannelHandler.set({ uuid: providedUUID });
 
         toResolve.push(Promise.all([
-          this.eventsHandler.dispatch({
+          this.#eventsHandler.dispatch({
             channel: isoSubscriberChannel,
             store: this.dispatcherTransactionStore,
             redisMetadata: {
@@ -401,7 +409,7 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
             inactiveIncomerTransactionStore.deleteTransaction(relatedHandlerTransaction.redisMetadata.transactionId)
         ]));
 
-        this.logger.info(this.standardLogFn({
+        this.#logger.info(this.#standardLogFn({
           ...dispatcherTransaction,
           redisMetadata: {
             ...dispatcherTransaction.redisMetadata,
@@ -421,7 +429,7 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
           inactiveIncomerTransactionStore.deleteTransaction(relatedHandlerTransaction.redisMetadata.transactionId)
       ]));
 
-      this.logger.debug(this.standardLogFn(
+      this.#logger.debug(this.#standardLogFn(
         dispatcherTransaction as unknown as StandardLogOpts<T>
       )("Spread transaction has been backup"));
 
@@ -443,7 +451,7 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
       inactiveIncomerTransactionStore.deleteTransaction(incomerTransactionId)
     ]);
 
-    this.logger.info(this.standardLogFn({
+    this.#logger.info(this.#standardLogFn({
       ...newlyTransaction,
       redisMetadata: {
         ...newlyTransaction.redisMetadata,
@@ -459,10 +467,11 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
       inactiveIncomerTransactionStore,
       incomerTransactionId
     } = options;
-    const { prefix, providedUUID } = isoPublisherIncomer;
+    const { providedUUID } = isoPublisherIncomer;
 
     const concernedIncomerStore = new TransactionStore({
-      prefix: `${prefix ? `${prefix}-` : ""}${providedUUID}`,
+      adapter: this.#redis,
+      prefix: providedUUID,
       instance: "incomer"
     });
 
@@ -477,7 +486,7 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
       inactiveIncomerTransactionStore.deleteTransaction(incomerTransactionId)
     ]);
 
-    this.logger.debug(this.standardLogFn(
+    this.#logger.debug(this.#standardLogFn(
       newlyIncomerMainTransaction as unknown as StandardLogOpts<T>
     )("Main transaction redistributed to an Incomer"));
   }
@@ -589,7 +598,8 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
     backupTransactionId: string
   ): Promise<void> {
     const concernedIncomerStore = new TransactionStore({
-      prefix: `${isoPublisher.prefix ? `${isoPublisher.prefix}-` : ""}${isoPublisher.providedUUID}`,
+      adapter: this.#redis,
+      prefix: isoPublisher.providedUUID,
       instance: "incomer"
     });
 
@@ -608,10 +618,10 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
   private async redistributeUnresolvedSpreadTransaction(options: RedistributeUnresolvedSpreadTransactionOptions):
     Promise<RedistributeUnresolvedSpreadTransactionResponse<T>> {
     const { backupIncomerTransaction, isoListener, relatedDispatcherTransactionId, backupTransactionId } = options;
-    const { providedUUID, prefix } = isoListener;
+    const { providedUUID } = isoListener;
 
-    const relatedChannel = this.incomerChannelHandler.get(providedUUID) ??
-      this.incomerChannelHandler.set({ uuid: providedUUID, prefix });
+    const relatedChannel = this.#incomerChannelHandler.get(providedUUID) ??
+      this.#incomerChannelHandler.set({ uuid: providedUUID });
 
     const dispatcherTransactionUUID = randomUUID();
     const event: Omit<DistributedEventMessage, "redisMetadata"> & {
@@ -634,7 +644,7 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
     };
 
     await Promise.all([
-      this.eventsHandler.dispatch({
+      this.#eventsHandler.dispatch({
         channel: relatedChannel,
         store: this.dispatcherTransactionStore,
         redisMetadata,
@@ -662,7 +672,8 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
     } = options;
 
     const relatedStore = new TransactionStore({
-      prefix: `${isoListener.prefix ? `${isoListener.prefix}-` : ""}${isoListener.providedUUID}`,
+      adapter: this.#redis,
+      prefix: isoListener.providedUUID,
       instance: "incomer"
     });
 
@@ -727,7 +738,8 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
       }
 
       const relatedIncomerTransactionStore = new TransactionStore({
-        prefix: `${relatedIncomer.prefix ? `${relatedIncomer.prefix}-` : ""}${transactionRecipient}`,
+        adapter: this.#redis,
+        prefix: transactionRecipient,
         instance: "incomer"
       });
 
@@ -805,7 +817,8 @@ export class TransactionHandler<T extends GenericEvent = GenericEvent> {
 
     for (const incomer of incomers) {
       const incomerStore = new TransactionStore({
-        prefix: `${incomer.prefix ? `${incomer.prefix}-` : ""}${incomer.providedUUID}`,
+        adapter: this.#redis,
+        prefix: incomer.providedUUID,
         instance: "incomer"
       });
 
